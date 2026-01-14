@@ -1,0 +1,200 @@
+package com.samsung.android.medivision.presentation.documentprocessor
+
+import android.graphics.ImageDecoder
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.samsung.android.medivision.data.util.PdfUtils
+
+@Composable
+fun DocumentProcessorScreen(
+    viewModel: DocumentProcessorViewModel
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            val fileName = it.path?.substringAfterLast("/") ?: "Selected File"
+            val mimeType = context.contentResolver.getType(it)
+
+            val bitmap = if (mimeType == "application/pdf") {
+                PdfUtils.renderPdfToBitmap(context, it)
+            } else {
+                if (Build.VERSION.SDK_INT < 28) {
+                    MediaStore.Images.Media.getBitmap(context.contentResolver, it)
+                } else {
+                    val source = ImageDecoder.createSource(context.contentResolver, it)
+                    ImageDecoder.decodeBitmap(source)
+                }
+            }
+
+            bitmap?.let { bmp ->
+                viewModel.onDocumentSelected(bmp, fileName)
+            }
+        }
+    }
+
+    DocumentProcessorContent(
+        bitmap = state.selectedBitmap,
+        fileName = state.fileName,
+        extractedText = state.extractedText,
+        isLoading = state.isLoading,
+        error = state.error,
+        onSelectFile = { launcher.launch("*/*") },
+        onProcessDocument = { viewModel.processPrescription() },
+        onDismissError = { viewModel.clearError() }
+    )
+}
+
+@Composable
+private fun DocumentProcessorContent(
+    bitmap: android.graphics.Bitmap?,
+    fileName: String,
+    extractedText: String,
+    isLoading: Boolean,
+    error: String?,
+    onSelectFile: () -> Unit,
+    onProcessDocument: () -> Unit,
+    onDismissError: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Prescription Scanner",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        Text(
+            text = "Upload a prescription (Image or PDF) to extract medicine details automatically.",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(bottom = 16.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Box(
+            modifier = Modifier
+                .height(300.dp)
+                .fillMaxWidth()
+                .padding(8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Document Preview",
+                    modifier = Modifier.fillMaxHeight()
+                )
+            } else {
+                Text(text = "No prescription selected")
+            }
+        }
+
+        if (fileName.isNotEmpty()) {
+            Text(
+                text = "File: $fileName",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onSelectFile,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Select File")
+            }
+
+            Button(
+                onClick = onProcessDocument,
+                enabled = bitmap != null && !isLoading,
+                modifier = Modifier.weight(1f)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text("Extract Info")
+                }
+            }
+        }
+
+        if (error != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Error: $error",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    TextButton(onClick = onDismissError) {
+                        Text("Dismiss")
+                    }
+                }
+            }
+        }
+
+        if (extractedText.isNotEmpty()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Extracted Medicine Information:",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = extractedText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
