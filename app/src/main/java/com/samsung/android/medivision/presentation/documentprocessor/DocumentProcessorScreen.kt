@@ -24,11 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import kotlin.math.min
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.samsung.android.medivision.data.util.PdfUtils
@@ -308,22 +310,64 @@ private fun ImageWithCoordinatesOverlay(
     bitmap: android.graphics.Bitmap,
     coordinates: List<com.samsung.android.medivision_sdk.Point>?
 ) {
-    var imageSize by remember { mutableStateOf(IntSize.Zero) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
     
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Calculate aspect ratio
+    val imageAspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { layoutCoordinates ->
+                containerSize = layoutCoordinates.size
+            }
+    ) {
+        // Calculate the displayed image size maintaining aspect ratio
+        val containerWidth = containerSize.width.toFloat()
+        val containerHeight = containerSize.height.toFloat()
+        
+        // Safety check for zero sizes
+        if (containerWidth <= 0f || containerHeight <= 0f || imageAspectRatio <= 0f) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Document Preview",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+            return@Box
+        }
+        
+        val containerAspectRatio = containerWidth / containerHeight
+        
+        val displayedWidth: Float
+        val displayedHeight: Float
+        val offsetX: Float
+        val offsetY: Float
+        
+        if (imageAspectRatio > containerAspectRatio) {
+            // Image is wider - fit to width
+            displayedWidth = containerWidth
+            displayedHeight = containerWidth / imageAspectRatio
+            offsetX = 0f
+            offsetY = (containerHeight - displayedHeight) / 2f
+        } else {
+            // Image is taller - fit to height
+            displayedWidth = containerHeight * imageAspectRatio
+            displayedHeight = containerHeight
+            offsetX = (containerWidth - displayedWidth) / 2f
+            offsetY = 0f
+        }
+        
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = "Document Preview",
-            modifier = Modifier
-                .fillMaxHeight()
-                .onGloballyPositioned { layoutCoordinates ->
-                    imageSize = layoutCoordinates.size
-                }
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize()
         )
         
         // Draw red dots overlay if coordinates are available
-        if (coordinates != null && coordinates.isNotEmpty() && imageSize != IntSize.Zero) {
+        if (coordinates != null && coordinates.isNotEmpty() && containerSize != IntSize.Zero) {
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
@@ -333,11 +377,9 @@ private fun ImageWithCoordinatesOverlay(
                 
                 coordinates.forEach { point ->
                     // Convert normalized coordinates (0-1) to pixel coordinates
-                    // Use Canvas size to ensure proper scaling
-                    val canvasWidth = size.width
-                    val canvasHeight = size.height
-                    val x = point.x * canvasWidth
-                    val y = point.y * canvasHeight
+                    // Account for the actual displayed image bounds with aspect ratio maintained
+                    val x = offsetX + (point.x * displayedWidth)
+                    val y = offsetY + (point.y * displayedHeight)
                     
                     // Draw red circle
                     drawCircle(
