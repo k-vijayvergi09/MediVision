@@ -82,6 +82,95 @@ class OpenRouterClient(
         }
     }
 
+    /**
+     * Generates text from a text prompt using Open Router (text-only, no image).
+     * 
+     * @param model The model to use (e.g., "openai/gpt-4o")
+     * @param prompt The text prompt
+     * @return The generated text or null if failed
+     */
+    suspend fun generateTextFromText(
+        model: String,
+        prompt: String
+    ): String? {
+        return try {
+            val request = OpenRouterRequest(
+                model = model,
+                messages = listOf(
+                    Message(
+                        role = "user",
+                        content = listOf(
+                            MessageContent.Text(prompt)
+                        )
+                    )
+                )
+            )
+
+            val response = service.getChatCompletions(
+                authorization = "Bearer $apiKey",
+                referer = siteUrl,
+                title = siteName,
+                request = request
+            )
+            
+            response.choices.firstOrNull()?.message?.content
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Generates text from a PDF file using Open Router.
+     * 
+     * @param model The model to use (e.g., "openai/gpt-4o")
+     * @param prompt The text prompt to accompany the PDF
+     * @param pdfBytes The PDF file as byte array
+     * @param fileName The name of the PDF file
+     * @return The generated text or null if failed
+     */
+    suspend fun generateTextFromPdf(
+        model: String,
+        prompt: String,
+        pdfBytes: ByteArray,
+        fileName: String
+    ): String? {
+        return try {
+            val base64Pdf = Base64.encodeToString(pdfBytes, Base64.NO_WRAP)
+            val pdfDataUrl = "data:application/pdf;base64,$base64Pdf"
+
+            val request = OpenRouterRequest(
+                model = model,
+                messages = listOf(
+                    Message(
+                        role = "user",
+                        content = listOf(
+                            MessageContent.Text(prompt),
+                            MessageContent.File(
+                                file = FileData(
+                                    filename = fileName,
+                                    fileData = pdfDataUrl
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+
+            val response = service.getChatCompletions(
+                authorization = "Bearer $apiKey",
+                referer = siteUrl,
+                title = siteName,
+                request = request
+            )
+            
+            response.choices.firstOrNull()?.message?.content
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
     private fun bitmapToBase64(bitmap: Bitmap): String {
         val outputStream = ByteArrayOutputStream()
         // Resize bitmap if it's too large to avoid request size limits

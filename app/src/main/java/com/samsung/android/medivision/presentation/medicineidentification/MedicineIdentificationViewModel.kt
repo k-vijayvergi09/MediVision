@@ -17,10 +17,26 @@ class MedicineIdentificationViewModel(
     private val _state = MutableStateFlow(MedicineIdentificationState())
     val state: StateFlow<MedicineIdentificationState> = _state.asStateFlow()
 
-    fun onImageSelected(bitmap: Bitmap) {
+    fun onImageSelected(bitmap: Bitmap, fileName: String = "") {
         _state.update { currentState ->
             currentState.copy(
                 selectedBitmap = bitmap,
+                pdfBytes = null,
+                fileName = fileName,
+                isPdf = false,
+                identificationResult = "",
+                error = null
+            )
+        }
+    }
+
+    fun onDocumentSelected(pdfBytes: ByteArray, fileName: String) {
+        _state.update { currentState ->
+            currentState.copy(
+                selectedBitmap = null,
+                pdfBytes = pdfBytes,
+                fileName = fileName,
+                isPdf = true,
                 identificationResult = "",
                 error = null
             )
@@ -28,12 +44,18 @@ class MedicineIdentificationViewModel(
     }
 
     fun identifyMedicine() {
-        val bitmap = _state.value.selectedBitmap ?: return
+        val state = _state.value
+        val bitmap = state.selectedBitmap
+        val pdfBytes = state.pdfBytes
+        val isPdf = state.isPdf
+        val fileName = state.fileName
+
+        if (bitmap == null && !isPdf) return
 
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
 
-            identifyMedicineUseCase(bitmap)
+            identifyMedicineUseCase(bitmap, pdfBytes, fileName, isPdf)
                 .onSuccess { identification ->
                     _state.update {
                         it.copy(
@@ -56,5 +78,9 @@ class MedicineIdentificationViewModel(
 
     fun clearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    fun setError(message: String) {
+        _state.update { it.copy(error = message) }
     }
 }

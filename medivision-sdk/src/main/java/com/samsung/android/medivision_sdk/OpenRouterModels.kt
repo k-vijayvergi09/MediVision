@@ -28,11 +28,23 @@ sealed class MessageContent {
     data class ImageUrl(
         @SerialName("image_url") val imageUrl: ImageUrlData
     ) : MessageContent()
+
+    @Serializable
+    @SerialName("file")
+    data class File(
+        @SerialName("file") val file: FileData
+    ) : MessageContent()
 }
 
 @Serializable
 data class ImageUrlData(
     val url: String
+)
+
+@Serializable
+data class FileData(
+    val filename: String,
+    @SerialName("file_data") val fileData: String
 )
 
 @Serializable
