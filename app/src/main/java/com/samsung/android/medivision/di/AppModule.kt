@@ -8,18 +8,29 @@ import com.samsung.android.medivision.domain.usecase.IdentifyMedicineUseCase
 import com.samsung.android.medivision.domain.usecase.ProcessPrescriptionUseCase
 import com.samsung.android.medivision.presentation.documentprocessor.DocumentProcessorViewModel
 import com.samsung.android.medivision.presentation.medicineidentification.MedicineIdentificationViewModel
+import com.samsung.android.medivision_sdk.MoondreamClient
 import com.samsung.android.medivision_sdk.OpenRouterClient
 
 object AppModule {
     
     private var apiKey: String = ""
+    private var moondreamApiKey: String = ""
     
-    fun initialize(apiKey: String) {
+    fun initialize(apiKey: String, moondreamApiKey: String = "") {
         this.apiKey = apiKey
+        this.moondreamApiKey = moondreamApiKey
     }
     
     private fun provideOpenRouterClient(): OpenRouterClient {
         return OpenRouterClient(apiKey = apiKey)
+    }
+    
+    private fun provideMoondreamClient(): MoondreamClient? {
+        return if (moondreamApiKey.isNotEmpty()) {
+            MoondreamClient(apiKey = moondreamApiKey)
+        } else {
+            null
+        }
     }
     
     // Medicine Identification Dependencies
@@ -45,6 +56,9 @@ object AppModule {
     }
     
     fun provideDocumentProcessorViewModel(): DocumentProcessorViewModel {
-        return DocumentProcessorViewModel(provideProcessPrescriptionUseCase())
+        return DocumentProcessorViewModel(
+            processPrescriptionUseCase = provideProcessPrescriptionUseCase(),
+            moondreamClient = provideMoondreamClient()
+        )
     }
 }

@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -15,10 +16,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -79,6 +88,8 @@ fun DocumentProcessorScreen(
         extractedText = state.extractedText,
         isLoading = state.isLoading,
         error = state.error,
+        medicineCoordinates = state.medicineCoordinates,
+        isDetectingCoordinates = state.isDetectingCoordinates,
         onSelectFile = { filePickerLauncher.launch("*/*") },
         onScanMedicines = {
             when (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)) {
@@ -98,6 +109,8 @@ private fun DocumentProcessorContent(
     extractedText: String,
     isLoading: Boolean,
     error: String?,
+    medicineCoordinates: List<com.samsung.android.medivision_sdk.Point>?,
+    isDetectingCoordinates: Boolean,
     onSelectFile: () -> Unit,
     onScanMedicines: () -> Unit,
     onProcessDocument: () -> Unit,
@@ -131,10 +144,9 @@ private fun DocumentProcessorContent(
             contentAlignment = Alignment.Center
         ) {
             if (bitmap != null) {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "Document Preview",
-                    modifier = Modifier.fillMaxHeight()
+                ImageWithCoordinatesOverlay(
+                    bitmap = bitmap,
+                    coordinates = medicineCoordinates
                 )
             } else {
                 Text(text = "No prescription selected")
@@ -147,6 +159,61 @@ private fun DocumentProcessorContent(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(vertical = 4.dp)
             )
+        }
+
+        if (isDetectingCoordinates) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Detecting medicine coordinates...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (medicineCoordinates != null && medicineCoordinates.isNotEmpty()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Medicine Coordinates Detected:",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    medicineCoordinates.forEachIndexed { index, point ->
+                        Text(
+                            text = "Medicine ${index + 1}: (${String.format("%.2f", point.x)}, ${String.format("%.2f", point.y)})",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                    Text(
+                        text = "Note: Coordinates are normalized (0-1)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
         }
 
         Button(
@@ -229,6 +296,54 @@ private fun DocumentProcessorContent(
                         text = extractedText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageWithCoordinatesOverlay(
+    bitmap: android.graphics.Bitmap,
+    coordinates: List<com.samsung.android.medivision_sdk.Point>?
+) {
+    var imageSize by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = "Document Preview",
+            modifier = Modifier
+                .fillMaxHeight()
+                .onGloballyPositioned { layoutCoordinates ->
+                    imageSize = layoutCoordinates.size
+                }
+        )
+        
+        // Draw red dots overlay if coordinates are available
+        if (coordinates != null && coordinates.isNotEmpty() && imageSize != IntSize.Zero) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .matchParentSize()
+            ) {
+                val dotRadius = with(density) { 12.dp.toPx() } // Red dot radius (bigger as requested)
+                
+                coordinates.forEach { point ->
+                    // Convert normalized coordinates (0-1) to pixel coordinates
+                    // Use Canvas size to ensure proper scaling
+                    val canvasWidth = size.width
+                    val canvasHeight = size.height
+                    val x = point.x * canvasWidth
+                    val y = point.y * canvasHeight
+                    
+                    // Draw red circle
+                    drawCircle(
+                        color = Color.Red,
+                        radius = dotRadius,
+                        center = Offset(x, y)
                     )
                 }
             }

@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.samsung.android.medivision_sdk"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 31

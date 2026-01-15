@@ -18,12 +18,14 @@ class MainActivity : ComponentActivity() {
 
     private val apiKey =
         "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"
+    
+    private val moondreamApiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlfaWQiOiI0OWY0ZjExNi0yZmZmLTQxMDMtOGNjNC1hMDY4YTkwZjEyNjMiLCJvcmdfaWQiOiJkMGdhQmpDQ1pHbkREZ1ZwTFN1SDYxcXlSck9LcGFKSiIsImlhdCI6MTc2ODQ3NDAxNywidmVyIjoxfQ.CV9s5FyWWcAtVqR2X4pysR9TmwbHMqKCVPJ0ykIMddI"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Initialize dependency injection once for the whole app
-        AppModule.initialize(apiKey)
+        AppModule.initialize(apiKey, moondreamApiKey)
 
         setContent {
             val navController = rememberNavController()
