@@ -3,16 +3,23 @@ package com.samsung.android.medivision
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.samsung.android.medivision.di.AppModule
 import com.samsung.android.medivision.presentation.documentprocessor.DocumentProcessorScreen
-import com.samsung.android.medivision.presentation.medicineidentification.MedicineIdentificationScreen
+import com.samsung.android.medivision.presentation.prescriptionupload.PrescriptionUploadScreen
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -25,34 +32,61 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // Initialize dependency injection once for the whole app
-        AppModule.initialize(apiKey, moondreamApiKey)
+        AppModule.initialize(applicationContext, apiKey, moondreamApiKey)
 
         setContent {
-            val navController = rememberNavController()
-
             MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    NavHost(
-                        navController = navController,
-                        startDestination = "medicine_identification"
-                    ) {
-                        composable(route = "medicine_identification") {
-                            val viewModel = AppModule.provideMedicineIdentificationViewModel()
-                            MedicineIdentificationScreen(
-                                viewModel = viewModel,
-                                onNavigateToProcessor = {
-                                    navController.navigate("document_processor")
-                                }
-                            )
-                        }
+                    TabbedScreen()
+                }
+            }
+        }
+    }
 
-                        composable(route = "document_processor") {
-                            val viewModel = AppModule.provideDocumentProcessorViewModel()
-                            DocumentProcessorScreen(viewModel = viewModel)
-                        }
+    @Composable
+    private fun TabbedScreen() {
+        val pagerState = rememberPagerState(pageCount = { 2 })
+        val coroutineScope = rememberCoroutineScope()
+        val tabs = listOf("Upload Prescription", "Scan Prescription")
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
+            TabRow(
+                selectedTabIndex = pagerState.currentPage
+            ) {
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = pagerState.currentPage == index,
+                        onClick = {
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(index)
+                            }
+                        },
+                        text = { Text(title) }
+                    )
+                }
+            }
+
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                when (page) {
+                    0 -> {
+                        val viewModel = AppModule.providePrescriptionUploadViewModel()
+                        PrescriptionUploadScreen(
+                            viewModel = viewModel
+                        )
+                    }
+                    1 -> {
+                        val viewModel = AppModule.provideDocumentProcessorViewModel()
+                        DocumentProcessorScreen(viewModel = viewModel)
                     }
                 }
             }
