@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
     private fun TabbedScreen() {
         val pagerState = rememberPagerState(pageCount = { 2 })
         val coroutineScope = rememberCoroutineScope()
-        val tabs = listOf("Upload Prescription", "Scan Prescription")
+        val tabs = listOf("Upload Prescription", "Identify Medicine")
 
         Column(
             modifier = Modifier

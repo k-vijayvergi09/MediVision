@@ -10,5 +10,6 @@ data class DocumentProcessorState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val medicineCoordinates: List<Point>? = null,
-    val isDetectingCoordinates: Boolean = false
+    val isDetectingCoordinates: Boolean = false,
+    val applicableMedicines: List<com.samsung.android.medivision.domain.model.Medicine> = emptyList()
 )

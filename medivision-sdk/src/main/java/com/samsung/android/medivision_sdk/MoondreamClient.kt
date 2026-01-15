@@ -83,19 +83,35 @@ class MoondreamClient(
         objectType: String
     ): List<Point>? {
         return try {
+            android.util.Log.d("MoondreamClient", "=== point() API call ===")
+            android.util.Log.d("MoondreamClient", "Request object type: '$objectType'")
+            android.util.Log.d("MoondreamClient", "Bitmap size: ${bitmap.width}x${bitmap.height}")
+
             val imageUrl = bitmapToDataUri(bitmap)
+            android.util.Log.d("MoondreamClient", "Image data URI length: ${imageUrl.length} characters")
+
             val request = MoondreamPointRequest(
                 imageUrl = imageUrl,
                 `object` = objectType
             )
+
+            android.util.Log.d("MoondreamClient", "Sending request to Moondream API...")
 
             val response = service.point(
                 apiKey = apiKey,
                 request = request
             )
 
+            android.util.Log.d("MoondreamClient", "Response received: ${response.points?.size ?: 0} point(s)")
+            response.points?.forEachIndexed { index, point ->
+                android.util.Log.d("MoondreamClient", "  Point $index: (${point.x}, ${point.y})")
+            }
+
             response.points
         } catch (e: Exception) {
+            android.util.Log.e("MoondreamClient", "Error in point() API call", e)
+            android.util.Log.e("MoondreamClient", "Exception message: ${e.message}")
+            android.util.Log.e("MoondreamClient", "Exception type: ${e.javaClass.simpleName}")
             e.printStackTrace()
             null
         }

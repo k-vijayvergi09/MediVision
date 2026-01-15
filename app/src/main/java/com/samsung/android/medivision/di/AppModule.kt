@@ -69,7 +69,8 @@ object AppModule {
     fun provideDocumentProcessorViewModel(): DocumentProcessorViewModel {
         return DocumentProcessorViewModel(
             processPrescriptionUseCase = provideProcessPrescriptionUseCase(),
-            moondreamClient = provideMoondreamClient()
+            moondreamClient = provideMoondreamClient(),
+            prescriptionContextManager = providePrescriptionContextManager()
         )
     }
 }

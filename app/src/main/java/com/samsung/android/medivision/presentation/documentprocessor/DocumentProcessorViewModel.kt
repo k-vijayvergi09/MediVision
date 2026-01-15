@@ -14,14 +14,12 @@ import kotlinx.coroutines.launch
 
 class DocumentProcessorViewModel(
     private val processPrescriptionUseCase: ProcessPrescriptionUseCase,
-    private val moondreamClient: MoondreamClient?
+    private val moondreamClient: MoondreamClient?,
+    private val prescriptionContextManager: com.samsung.android.medivision.data.storage.PrescriptionContextManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(DocumentProcessorState())
     val state: StateFlow<DocumentProcessorState> = _state.asStateFlow()
-    
-    // Extract the object type from the prescription prompt - default to "medicine"
-    private val medicineObjectType = "head"
 
     fun onDocumentSelected(bitmap: Bitmap, fileName: String) {
         _state.update { currentState ->
@@ -30,40 +28,152 @@ class DocumentProcessorViewModel(
                 fileName = fileName,
                 extractedText = "",
                 error = null,
-                medicineCoordinates = null
+                medicineCoordinates = null,
+                applicableMedicines = emptyList()
             )
         }
-        
-        // Automatically detect medicine coordinates when photo is taken
-        detectMedicineCoordinates(bitmap)
+
+        // Automatically detect applicable medicines and their coordinates
+        detectApplicableMedicines(bitmap)
     }
-    
+
     /**
-     * Detects medicine coordinates using Moondream API.
-     * Uses the point method to get precise center coordinates for medicines.
+     * Determines the current time of day and filters applicable medicines.
+     * Then detects their coordinates in the scanned image.
      */
-    private fun detectMedicineCoordinates(bitmap: Bitmap) {
+    private fun detectApplicableMedicines(bitmap: Bitmap) {
         if (moondreamClient == null) {
+            Log.e("ViewModel", "Moondream API client is null")
+            _state.update { it.copy(error = "Moondream API not available") }
             return
         }
-        
+
         viewModelScope.launch {
             _state.update { it.copy(isDetectingCoordinates = true, error = null) }
-            
+
             try {
-                Log.i("ViewModel", "detecting point")
-                val coordinates = moondreamClient.point(bitmap, medicineObjectType)
-                _state.update { 
+                Log.d("ViewModel", "=== Starting detectApplicableMedicines flow ===")
+
+                // Get current time of day
+                val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                val timeOfDay = when {
+                    currentHour < 12 -> "Morning"
+                    currentHour < 17 -> "Morning" // Treating afternoon as morning for medicine purposes
+                    else -> "Evening"
+                }
+
+                Log.i("ViewModel", "Current time: Hour=$currentHour, TimeOfDay=$timeOfDay")
+
+                // Get all saved prescriptions
+                val prescriptions = prescriptionContextManager.getAllPrescriptionContexts()
+                Log.i("ViewModel", "Retrieved ${prescriptions.size} saved prescription(s)")
+
+                prescriptions.forEachIndexed { index, prescription ->
+                    Log.d("ViewModel", "Prescription $index: ${prescription.fileName}, Medicines count: ${prescription.medicines.size}")
+                }
+
+                // Collect all medicines that should be taken at this time
+                val applicableMedicines = mutableListOf<com.samsung.android.medivision.domain.model.Medicine>()
+                prescriptions.forEach { prescription ->
+                    prescription.medicines.forEach { medicine ->
+                        Log.d("ViewModel", "Evaluating medicine: name='${medicine.name}', whenToTake='${medicine.whenToTake}', frequency=${medicine.frequency}")
+
+                        val shouldTake = when (medicine.whenToTake) {
+                            "Morning" -> timeOfDay == "Morning"
+                            "Evening" -> timeOfDay == "Evening"
+                            "Both" -> true
+                            else -> false
+                        }
+
+                        Log.d("ViewModel", "  -> shouldTake=$shouldTake (current time: $timeOfDay)")
+
+                        if (shouldTake) {
+                            applicableMedicines.add(medicine)
+                            Log.i("ViewModel", "  -> Added '${medicine.name}' to applicable medicines")
+                        }
+                    }
+                }
+
+                if (applicableMedicines.isEmpty()) {
+                    Log.w("ViewModel", "No applicable medicines found for $timeOfDay time")
+                    _state.update {
+                        it.copy(
+                            isDetectingCoordinates = false,
+                            applicableMedicines = emptyList(),
+                            extractedText = "No medicines found for $timeOfDay time in your saved prescriptions."
+                        )
+                    }
+                    return@launch
+                }
+
+                Log.i("ViewModel", "=== Applicable medicines for $timeOfDay: ${applicableMedicines.size} ===")
+                applicableMedicines.forEachIndexed { index, medicine ->
+                    Log.i("ViewModel", "  ${index + 1}. ${medicine.name} (${medicine.whenToTake}, ${medicine.frequency}x)")
+                }
+
+                // Detect coordinates for each applicable medicine
+                val allCoordinates = mutableListOf<com.samsung.android.medivision_sdk.Point>()
+                val detectedMedicines = mutableListOf<String>()
+
+                applicableMedicines.forEachIndexed { index, medicine ->
+                    try {
+                        Log.i("ViewModel", "--- Processing medicine ${index + 1}/${applicableMedicines.size}: '${medicine.name}' ---")
+                        Log.d("ViewModel", "Calling Moondream API with query: '${medicine.name}'")
+
+                        val coordinates = moondreamClient.point(bitmap, medicine.name)
+
+                        Log.i("ViewModel", "Moondream API response: ${coordinates!!.size} coordinate(s) found")
+                        coordinates!!.forEachIndexed { coordIndex, point ->
+                            Log.d("ViewModel", "  Coordinate $coordIndex: x=${point.x}, y=${point.y}")
+                        }
+
+                        if (coordinates!!.isNotEmpty()) {
+                            allCoordinates.addAll(coordinates)
+                            detectedMedicines.add(medicine.name)
+                            Log.i("ViewModel", "✓ Successfully detected '${medicine.name}' in image")
+                        } else {
+                            Log.w("ViewModel", "✗ Medicine '${medicine.name}' not found in image")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ViewModel", "✗ Exception while detecting '${medicine.name}': ${e.message}", e)
+                    }
+                }
+
+                Log.i("ViewModel", "=== Detection Summary ===")
+                Log.i("ViewModel", "Total applicable medicines: ${applicableMedicines.size}")
+                Log.i("ViewModel", "Successfully detected: ${detectedMedicines.size}")
+                Log.i("ViewModel", "Total coordinates found: ${allCoordinates.size}")
+                if (detectedMedicines.isNotEmpty()) {
+                    Log.i("ViewModel", "Detected medicines: ${detectedMedicines.joinToString(", ")}")
+                }
+
+                val resultText = if (detectedMedicines.isNotEmpty()) {
+                    "Time: $timeOfDay\n\n" +
+                    "Medicines to take now:\n" +
+                    applicableMedicines.joinToString("\n") { "• ${it.name}" } +
+                    "\n\nDetected in image:\n" +
+                    detectedMedicines.joinToString("\n") { "✓ $it" }
+                } else {
+                    "Time: $timeOfDay\n\n" +
+                    "Medicines to take now:\n" +
+                    applicableMedicines.joinToString("\n") { "• ${it.name}" } +
+                    "\n\nNone of these medicines were found in the image."
+                }
+
+                _state.update {
                     it.copy(
-                        medicineCoordinates = coordinates,
-                        isDetectingCoordinates = false
+                        medicineCoordinates = if (allCoordinates.isNotEmpty()) allCoordinates else null,
+                        applicableMedicines = applicableMedicines,
+                        isDetectingCoordinates = false,
+                        extractedText = resultText
                     )
                 }
             } catch (e: Exception) {
-                _state.update { 
+                Log.e("ViewModel", "Error in detectApplicableMedicines", e)
+                _state.update {
                     it.copy(
                         isDetectingCoordinates = false,
-                        error = "Failed to detect medicine coordinates: ${e.message}"
+                        error = "Failed to detect medicines: ${e.message}"
                     )
                 }
             }

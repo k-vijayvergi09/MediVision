@@ -80,7 +80,7 @@ fun DocumentProcessorScreen(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         bitmap?.let {
-            viewModel.onDocumentSelected(it, "Scanned medicines")
+            viewModel.onDocumentSelected(it, "Camera capture")
         }
     }
 
@@ -90,7 +90,7 @@ fun DocumentProcessorScreen(
         if (granted) {
             cameraLauncher.launch(null)
         } else {
-            viewModel.setError("Camera permission denied. Please enable it to scan medicines.")
+            viewModel.setError("Camera permission denied. Please enable it to identify medicines.")
         }
     }
 
@@ -152,13 +152,13 @@ private fun DocumentProcessorContent(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Medicine Scanner",
+                    text = "Medicine Identifier",
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Scan medicines to find out insights",
+                    text = "Identify medicines in real-time or from images",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -273,7 +273,7 @@ private fun DocumentProcessorContent(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Detecting medicine coordinates...",
+                            text = "Analyzing medicines for current time...",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
@@ -293,7 +293,7 @@ private fun DocumentProcessorContent(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Medicine Locations Detected",
+                            text = "✓ Medicines Found in Image",
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(bottom = 12.dp),
                             color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -302,28 +302,14 @@ private fun DocumentProcessorContent(
                             color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
-                        medicineCoordinates.forEachIndexed { index, point ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "Medicine ${index + 1}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
-                                Text(
-                                    text = "(${String.format("%.2f", point.x)}, ${String.format("%.2f", point.y)})",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Found ${medicineCoordinates.size} medicine location(s)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "📍 Red dots show detected medicine positions",
+                            text = "Red dots on the image show where the medicines are located",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
                         )
@@ -347,7 +333,7 @@ private fun DocumentProcessorContent(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Scan to Verify",
+                    text = "Capture Image",
                     style = MaterialTheme.typography.titleMedium
                 )
             }
@@ -397,7 +383,7 @@ private fun DocumentProcessorContent(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Extract")
+                        Text("Identify")
                     }
                 }
             }
@@ -448,7 +434,7 @@ private fun DocumentProcessorContent(
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text(
-                            text = "Extracted Medicine Information",
+                            text = "Identified Medicine Information",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
