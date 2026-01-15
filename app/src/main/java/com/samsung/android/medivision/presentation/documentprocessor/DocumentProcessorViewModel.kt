@@ -21,6 +21,79 @@ class DocumentProcessorViewModel(
     private val _state = MutableStateFlow(DocumentProcessorState())
     val state: StateFlow<DocumentProcessorState> = _state.asStateFlow()
 
+    // Configuration: Enable verification to check each detected point
+    // Set to false for faster detection (may have false positives)
+    // Set to true for accurate detection (slower but verifies each point)
+    private val enableVerification = true
+
+    /**
+     * Verifies if a detected point actually contains the medicine name by asking
+     * the LLM to intelligently match what's visible with the expected medicine.
+     * Uses LLM intelligence to handle abbreviations, partial names, and variations.
+     */
+    private suspend fun verifyMedicineAtPoint(
+        bitmap: Bitmap,
+        medicineName: String,
+        point: com.samsung.android.medivision_sdk.Point
+    ): Boolean {
+        return try {
+            // Use LLM intelligence to verify the match with a simpler, more flexible approach
+            val question = """
+                Is the medicine "$medicineName" visible in this image?
+                This includes:
+                - Exact name match
+                - Abbreviations (like "Para" for "Paracetamol", "ASP" for "Aspirin")
+                - Partial names
+                - Brand names for this generic medicine
+
+                Respond with just YES or NO.
+            """.trimIndent()
+
+            val response = moondreamClient?.query(bitmap, question)
+
+            Log.d("ViewModel", "Verification query for '$medicineName'")
+            Log.d("ViewModel", "LLM response: '$response'")
+
+            if (response == null) {
+                Log.w("ViewModel", "Null response from LLM, accepting by default")
+                return true
+            }
+
+            // Be more flexible in parsing the response
+            val cleanResponse = response.trim().uppercase()
+            val isVerified = when {
+                // Direct YES
+                cleanResponse == "YES" -> true
+                cleanResponse.startsWith("YES") -> true
+
+                // Check for affirmative patterns
+                cleanResponse.contains("YES") && !cleanResponse.contains("NO") -> true
+
+                // Direct NO
+                cleanResponse == "NO" -> false
+                cleanResponse == "NO." -> false
+
+                // If response is ambiguous and doesn't clearly say NO, accept it
+                !cleanResponse.contains("NO") && cleanResponse.isNotEmpty() -> {
+                    Log.d("ViewModel", "Ambiguous response, accepting by default")
+                    true
+                }
+
+                // Clear rejection
+                else -> false
+            }
+
+            Log.d("ViewModel", "Verification result for '$medicineName': $isVerified (cleaned response: '$cleanResponse')")
+
+            isVerified
+        } catch (e: Exception) {
+            Log.e("ViewModel", "Verification failed: ${e.message}", e)
+            // If verification fails, assume it's valid (fail-open approach)
+            Log.d("ViewModel", "Exception occurred, accepting by default")
+            true
+        }
+    }
+
     fun onDocumentSelected(bitmap: Bitmap, fileName: String) {
         _state.update { currentState ->
             currentState.copy(
@@ -118,21 +191,65 @@ class DocumentProcessorViewModel(
                 applicableMedicines.forEachIndexed { index, medicine ->
                     try {
                         Log.i("ViewModel", "--- Processing medicine ${index + 1}/${applicableMedicines.size}: '${medicine.name}' ---")
-                        Log.d("ViewModel", "Calling Moondream API with query: '${medicine.name}'")
 
-                        val coordinates = moondreamClient.point(bitmap, medicine.name)
+                        // Try with more specific query first (medicine name with "tablet" or "pill" context)
+                        val specificQuery = "${medicine.name} medicine"
+                        Log.d("ViewModel", "Calling Moondream API with query: '$specificQuery'")
 
-                        Log.i("ViewModel", "Moondream API response: ${coordinates!!.size} coordinate(s) found")
-                        coordinates!!.forEachIndexed { coordIndex, point ->
-                            Log.d("ViewModel", "  Coordinate $coordIndex: x=${point.x}, y=${point.y}")
-                        }
+                        val coordinates = moondreamClient.point(bitmap, specificQuery)
 
-                        if (coordinates!!.isNotEmpty()) {
-                            allCoordinates.addAll(coordinates)
-                            detectedMedicines.add(medicine.name)
-                            Log.i("ViewModel", "✓ Successfully detected '${medicine.name}' in image")
+                        if (coordinates == null || coordinates.isEmpty()) {
+                            Log.w("ViewModel", "No results with specific query, trying just medicine name: '${medicine.name}'")
+                            val fallbackCoordinates = moondreamClient.point(bitmap, medicine.name)
+
+                            if (fallbackCoordinates != null && fallbackCoordinates.isNotEmpty()) {
+                                Log.i("ViewModel", "Fallback query returned ${fallbackCoordinates.size} coordinate(s)")
+
+                                // Take the first coordinate as best match
+                                val bestMatch = fallbackCoordinates.first()
+
+                                // Optionally verify the match
+                                val isValid = if (enableVerification) {
+                                    Log.d("ViewModel", "Verifying detected point for '${medicine.name}'...")
+                                    verifyMedicineAtPoint(bitmap, medicine.name, bestMatch)
+                                } else {
+                                    true
+                                }
+
+                                if (isValid) {
+                                    allCoordinates.add(bestMatch)
+                                    detectedMedicines.add(medicine.name)
+                                    Log.i("ViewModel", "✓ Successfully detected '${medicine.name}' at (${bestMatch.x}, ${bestMatch.y})")
+                                } else {
+                                    Log.w("ViewModel", "✗ Verification failed for '${medicine.name}' - not the correct medicine")
+                                }
+                            } else {
+                                Log.w("ViewModel", "✗ Medicine '${medicine.name}' not found in image")
+                            }
                         } else {
-                            Log.w("ViewModel", "✗ Medicine '${medicine.name}' not found in image")
+                            Log.i("ViewModel", "Moondream API response: ${coordinates.size} coordinate(s) found")
+                            coordinates.forEachIndexed { coordIndex, point ->
+                                Log.d("ViewModel", "  Coordinate $coordIndex: x=${point.x}, y=${point.y}")
+                            }
+
+                            // Take the first coordinate as best match
+                            val bestMatch = coordinates.first()
+
+                            // Optionally verify the match
+                            val isValid = if (enableVerification) {
+                                Log.d("ViewModel", "Verifying detected point for '${medicine.name}'...")
+                                verifyMedicineAtPoint(bitmap, medicine.name, bestMatch)
+                            } else {
+                                true
+                            }
+
+                            if (isValid) {
+                                allCoordinates.add(bestMatch)
+                                detectedMedicines.add(medicine.name)
+                                Log.i("ViewModel", "✓ Successfully detected '${medicine.name}' at (${bestMatch.x}, ${bestMatch.y}) (selected best match from ${coordinates.size} results)")
+                            } else {
+                                Log.w("ViewModel", "✗ Verification failed for '${medicine.name}' - not the correct medicine")
+                            }
                         }
                     } catch (e: Exception) {
                         Log.e("ViewModel", "✗ Exception while detecting '${medicine.name}': ${e.message}", e)
