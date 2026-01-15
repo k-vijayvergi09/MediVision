@@ -22,12 +22,14 @@ class PrescriptionContextManager(context: Context) {
     fun savePrescriptionContext(
         fileName: String,
         extractedText: String,
+        medicines: List<com.samsung.android.medivision.domain.model.Medicine> = emptyList(),
         isPdf: Boolean
     ): PrescriptionContext {
         val context = PrescriptionContext(
             id = UUID.randomUUID().toString(),
             fileName = fileName,
             extractedText = extractedText,
+            medicines = medicines,
             timestamp = System.currentTimeMillis(),
             isPdf = isPdf
         )

@@ -67,6 +67,7 @@ class PrescriptionUploadViewModel(
                     val savedContext = prescriptionContextManager.savePrescriptionContext(
                         fileName = fileName,
                         extractedText = identification.description,
+                        medicines = identification.medicines,
                         isPdf = isPdf
                     )
 
