@@ -58,4 +58,8 @@ class DocumentProcessorViewModel(
     fun clearError() {
         _state.update { it.copy(error = null) }
     }
+
+    fun setError(message: String) {
+        _state.update { it.copy(error = message) }
+    }
 }

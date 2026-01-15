@@ -1,5 +1,7 @@
 package com.samsung.android.medivision.presentation.documentprocessor
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
@@ -18,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.samsung.android.medivision.data.util.PdfUtils
 
@@ -28,7 +31,7 @@ fun DocumentProcessorScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    val launcher = rememberLauncherForActivityResult(
+    val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
@@ -52,13 +55,37 @@ fun DocumentProcessorScreen(
         }
     }
 
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        bitmap?.let {
+            viewModel.onDocumentSelected(it, "Scanned medicines")
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            cameraLauncher.launch(null)
+        } else {
+            viewModel.setError("Camera permission denied. Please enable it to scan medicines.")
+        }
+    }
+
     DocumentProcessorContent(
         bitmap = state.selectedBitmap,
         fileName = state.fileName,
         extractedText = state.extractedText,
         isLoading = state.isLoading,
         error = state.error,
-        onSelectFile = { launcher.launch("*/*") },
+        onSelectFile = { filePickerLauncher.launch("*/*") },
+        onScanMedicines = {
+            when (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)) {
+                PackageManager.PERMISSION_GRANTED -> cameraLauncher.launch(null)
+                else -> cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
+        },
         onProcessDocument = { viewModel.processPrescription() },
         onDismissError = { viewModel.clearError() }
     )
@@ -72,6 +99,7 @@ private fun DocumentProcessorContent(
     isLoading: Boolean,
     error: String?,
     onSelectFile: () -> Unit,
+    onScanMedicines: () -> Unit,
     onProcessDocument: () -> Unit,
     onDismissError: () -> Unit
 ) {
@@ -119,6 +147,15 @@ private fun DocumentProcessorContent(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(vertical = 4.dp)
             )
+        }
+
+        Button(
+            onClick = onScanMedicines,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+        ) {
+            Text("Scan medicines to verify")
         }
 
         Row(
