@@ -1,10 +1,10 @@
 package com.samsung.android.medivision.di
 
 import android.content.Context
-import com.samsung.android.medivision.data.repository.DocumentRepositoryImpl
+import com.samsung.android.medivision.data.repository.PrescriptionRepositoryImpl
 import com.samsung.android.medivision.data.repository.MedicineRepositoryImpl
 import com.samsung.android.medivision.data.storage.PrescriptionContextManager
-import com.samsung.android.medivision.domain.repository.DocumentRepository
+import com.samsung.android.medivision.domain.repository.PrescriptionRepository
 import com.samsung.android.medivision.domain.repository.MedicineRepository
 import com.samsung.android.medivision.domain.usecase.IdentifyMedicineUseCase
 import com.samsung.android.medivision.domain.usecase.ProcessPrescriptionUseCase
@@ -57,19 +57,18 @@ object AppModule {
         )
     }
     
-    // Document Processor Dependencies
-    private fun provideDocumentRepository(): DocumentRepository {
-        return DocumentRepositoryImpl(provideOpenRouterClient())
+    private fun providePrescriptionRepository(): PrescriptionRepository {
+        return PrescriptionRepositoryImpl(provideOpenRouterClient())
     }
     
     private fun provideProcessPrescriptionUseCase(): ProcessPrescriptionUseCase {
-        return ProcessPrescriptionUseCase(provideDocumentRepository())
+        return ProcessPrescriptionUseCase(providePrescriptionRepository())
     }
     
-    fun provideDocumentProcessorViewModel(): ScanMedicineViewModel {
+    fun provideScanMedicineViewModel(): ScanMedicineViewModel {
         return ScanMedicineViewModel(
             processPrescriptionUseCase = provideProcessPrescriptionUseCase(),
-            moondreamClient = provideMoondreamClient(),
+            openRouterClient = provideOpenRouterClient(),
             prescriptionContextManager = providePrescriptionContextManager()
         )
     }

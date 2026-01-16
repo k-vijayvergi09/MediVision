@@ -327,7 +327,7 @@ private fun ScanMedicineContent(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Red dots on the image show where the medicines are located",
+                            text = "Green dots on the image show where the medicines are located",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
                         )
@@ -533,24 +533,24 @@ private fun ImageWithCoordinatesOverlay(
             modifier = Modifier.fillMaxSize()
         )
         
-        // Draw red dots overlay if coordinates are available
+        // Draw green dots overlay if coordinates are available
         if (coordinates != null && coordinates.isNotEmpty() && containerSize != IntSize.Zero) {
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
                     .matchParentSize()
             ) {
-                val dotRadius = with(density) { 12.dp.toPx() } // Red dot radius (bigger as requested)
-                
+                val dotRadius = with(density) { 8.dp.toPx() } // Green dot radius (smaller as requested)
+
                 coordinates.forEach { point ->
                     // Convert normalized coordinates (0-1) to pixel coordinates
                     // Account for the actual displayed image bounds with aspect ratio maintained
                     val x = offsetX + (point.x * displayedWidth)
                     val y = offsetY + (point.y * displayedHeight)
-                    
-                    // Draw red circle
+
+                    // Draw green circle
                     drawCircle(
-                        color = Color.Red,
+                        color = Color.Green,
                         radius = dotRadius,
                         center = Offset(x, y)
                     )

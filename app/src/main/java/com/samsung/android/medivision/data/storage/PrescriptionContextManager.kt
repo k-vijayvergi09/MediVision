@@ -6,6 +6,7 @@ import com.samsung.android.medivision.domain.model.PrescriptionContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
+import androidx.core.content.edit
 
 class PrescriptionContextManager(context: Context) {
 
@@ -41,9 +42,9 @@ class PrescriptionContextManager(context: Context) {
         val contextsToSave = existingContexts.take(50)
 
         val jsonString = json.encodeToString(contextsToSave)
-        sharedPreferences.edit()
-            .putString(KEY_PRESCRIPTION_CONTEXTS, jsonString)
-            .apply()
+        sharedPreferences.edit {
+            putString(KEY_PRESCRIPTION_CONTEXTS, jsonString)
+        }
 
         return context
     }
@@ -57,10 +58,6 @@ class PrescriptionContextManager(context: Context) {
         } catch (e: Exception) {
             emptyList()
         }
-    }
-
-    fun getMostRecentContext(): PrescriptionContext? {
-        return getAllPrescriptionContexts().firstOrNull()
     }
 
     fun deletePrescription(prescriptionId: String) {
@@ -78,9 +75,9 @@ class PrescriptionContextManager(context: Context) {
     }
 
     fun clearAllContexts() {
-        sharedPreferences.edit()
-            .remove(KEY_PRESCRIPTION_CONTEXTS)
-            .apply()
+        sharedPreferences.edit {
+            remove(KEY_PRESCRIPTION_CONTEXTS)
+        }
     }
 
     companion object {

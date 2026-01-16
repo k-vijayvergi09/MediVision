@@ -24,8 +24,8 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private val apiKey =
-        "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"
+    private val openrouterApiKey =
+        "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"
     
     private val moondreamApiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlfaWQiOiI0OWY0ZjExNi0yZmZmLTQxMDMtOGNjNC1hMDY4YTkwZjEyNjMiLCJvcmdfaWQiOiJkMGdhQmpDQ1pHbkREZ1ZwTFN1SDYxcXlSck9LcGFKSiIsImlhdCI6MTc2ODQ3NDAxNywidmVyIjoxfQ.CV9s5FyWWcAtVqR2X4pysR9TmwbHMqKCVPJ0ykIMddI"
 
@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // Initialize dependency injection once for the whole app
-        AppModule.initialize(applicationContext, apiKey, moondreamApiKey)
+        AppModule.initialize(applicationContext, openrouterApiKey, moondreamApiKey)
 
         setContent {
             MaterialTheme {
@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     1 -> {
-                        val viewModel = AppModule.provideDocumentProcessorViewModel()
+                        val viewModel = AppModule.provideScanMedicineViewModel()
                         ScanMedicineScreen(viewModel = viewModel)
                     }
                 }

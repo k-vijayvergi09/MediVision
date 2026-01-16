@@ -6,93 +6,136 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.samsung.android.medivision.data.storage.PrescriptionContextManager
 import com.samsung.android.medivision.domain.usecase.ProcessPrescriptionUseCase
-import com.samsung.android.medivision_sdk.MoondreamClient
+import com.samsung.android.medivision_sdk.OpenRouterClient
 import com.samsung.android.medivision_sdk.Point
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 class ScanMedicineViewModel(
     private val processPrescriptionUseCase: ProcessPrescriptionUseCase,
-    private val moondreamClient: MoondreamClient?,
+    private val openRouterClient: OpenRouterClient,
     private val prescriptionContextManager: PrescriptionContextManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ScanMedicineState())
     val state: StateFlow<ScanMedicineState> = _state.asStateFlow()
 
-    // Configuration: Enable verification to check each detected point
-    // Set to false for faster detection (may have false positives)
-    // Set to true for accurate detection (slower but verifies each point)
-    private val enableVerification = true
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
 
     /**
-     * Verifies if a detected point actually contains the medicine name by asking
-     * the LLM to intelligently match what's visible with the expected medicine.
-     * Uses LLM intelligence to handle abbreviations, partial names, and variations.
+     * Data class for coordinate detection response from OpenRouter.
      */
-    private suspend fun verifyMedicineAtPoint(
+    @Serializable
+    data class CoordinateResponse(
+        val coordinates: List<Coordinate>
+    )
+
+    @Serializable
+    data class Coordinate(
+        val x: Float,
+        val y: Float
+    )
+
+    /**
+     * Detects medicine coordinates using OpenRouter API with vision capabilities.
+     * Returns normalized coordinates (0-1) for the medicine location in the image.
+     */
+    private suspend fun detectMedicineCoordinates(
         bitmap: Bitmap,
-        medicineName: String,
-        point: Point
-    ): Boolean {
+        medicineName: String
+    ): List<Point>? {
         return try {
-            // Use LLM intelligence to verify the match with a simpler, more flexible approach
-            val question = """
-                Is the medicine "$medicineName" visible in this image?
-                This includes:
+            Log.d("ViewModel", "=== detectMedicineCoordinates() API call ===")
+            Log.d("ViewModel", "Request medicine name: '$medicineName'")
+
+            val prompt = """
+                Analyze this image and find the location of the medicine named "$medicineName".
+
+                Look for:
                 - Exact name match
                 - Abbreviations (like "Para" for "Paracetamol", "ASP" for "Aspirin")
                 - Partial names
                 - Brand names for this generic medicine
 
-                Respond with just YES or NO.
-            """.trimIndent()
+                If you find the medicine, return its location as normalized coordinates (0-1 range, where 0,0 is top-left and 1,1 is bottom-right).
+                Return the center point of where the medicine name is visible.
 
-            val response = moondreamClient?.query(bitmap, question)
-
-            Log.d("ViewModel", "Verification query for '$medicineName'")
-            Log.d("ViewModel", "LLM response: '$response'")
-
-            if (response == null) {
-                Log.w("ViewModel", "Null response from LLM, accepting by default")
-                return true
-            }
-
-            // Be more flexible in parsing the response
-            val cleanResponse = response.trim().uppercase()
-            val isVerified = when {
-                // Direct YES
-                cleanResponse == "YES" -> true
-                cleanResponse.startsWith("YES") -> true
-
-                // Check for affirmative patterns
-                cleanResponse.contains("YES") && !cleanResponse.contains("NO") -> true
-
-                // Direct NO
-                cleanResponse == "NO" -> false
-                cleanResponse == "NO." -> false
-
-                // If response is ambiguous and doesn't clearly say NO, accept it
-                !cleanResponse.contains("NO") && cleanResponse.isNotEmpty() -> {
-                    Log.d("ViewModel", "Ambiguous response, accepting by default")
-                    true
+                Respond ONLY with valid JSON in this exact format:
+                {
+                  "coordinates": [
+                    {"x": 0.5, "y": 0.3}
+                  ]
                 }
 
-                // Clear rejection
-                else -> false
+                If the medicine is not found, return:
+                {
+                  "coordinates": []
+                }
+
+                Do not include any other text, explanation, or markdown formatting. Only return the JSON object.
+            """.trimIndent()
+
+            Log.d("ViewModel", "Calling OpenRouter API with vision prompt...")
+
+            val response = openRouterClient.generateTextFromImage(
+                model = "openai/gpt-4o",
+                prompt = prompt,
+                bitmap = bitmap
+            )
+
+            Log.d("ViewModel", "Raw API response: '$response'")
+
+            if (response == null) {
+                Log.w("ViewModel", "Null response from OpenRouter API")
+                return null
             }
 
-            Log.d("ViewModel", "Verification result for '$medicineName': $isVerified (cleaned response: '$cleanResponse')")
+            // Clean up the response - remove markdown code blocks if present
+            val cleanedResponse = response
+                .replace("```json", "")
+                .replace("```", "")
+                .trim()
 
-            isVerified
+            Log.d("ViewModel", "Cleaned response: '$cleanedResponse'")
+
+            // Parse JSON response
+            val coordinateResponse = try {
+                json.decodeFromString<CoordinateResponse>(cleanedResponse)
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Failed to parse coordinate response: ${e.message}", e)
+                return null
+            }
+
+            if (coordinateResponse.coordinates.isEmpty()) {
+                Log.i("ViewModel", "No coordinates found in response")
+                return emptyList()
+            }
+
+            // Convert to Point objects
+            val points = coordinateResponse.coordinates.map { coord ->
+                Point(x = coord.x, y = coord.y)
+            }
+
+            Log.i("ViewModel", "Successfully parsed ${points.size} coordinate(s):")
+            points.forEachIndexed { index, point ->
+                Log.d("ViewModel", "  Point $index: (${point.x}, ${point.y})")
+            }
+
+            points
+
         } catch (e: Exception) {
-            Log.e("ViewModel", "Verification failed: ${e.message}", e)
-            // If verification fails, assume it's valid (fail-open approach)
-            Log.d("ViewModel", "Exception occurred, accepting by default")
-            true
+            Log.e("ViewModel", "Error in detectMedicineCoordinates()", e)
+            Log.e("ViewModel", "Exception message: ${e.message}")
+            null
         }
     }
 
@@ -114,15 +157,9 @@ class ScanMedicineViewModel(
 
     /**
      * Determines the current time of day and filters applicable medicines.
-     * Then detects their coordinates in the scanned image.
+     * Then detects their coordinates in the scanned image using OpenRouter API.
      */
     private fun detectApplicableMedicines(bitmap: Bitmap) {
-        if (moondreamClient == null) {
-            Log.e("ViewModel", "Moondream API client is null")
-            _state.update { it.copy(error = "Moondream API not available") }
-            return
-        }
-
         viewModelScope.launch {
             _state.update { it.copy(isDetectingCoordinates = true, error = null) }
 
@@ -194,64 +231,26 @@ class ScanMedicineViewModel(
                     try {
                         Log.i("ViewModel", "--- Processing medicine ${index + 1}/${applicableMedicines.size}: '${medicine.name}' ---")
 
-                        // Try with more specific query first (medicine name with "tablet" or "pill" context)
-                        val specificQuery = "${medicine.name} medicine"
-                        Log.d("ViewModel", "Calling Moondream API with query: '$specificQuery'")
+                        // Use OpenRouter API to detect medicine coordinates
+                        Log.d("ViewModel", "Calling OpenRouter API to detect: '${medicine.name}'")
 
-                        val coordinates = moondreamClient.point(bitmap, specificQuery)
+                        val coordinates = detectMedicineCoordinates(bitmap, medicine.name)
 
-                        if (coordinates == null || coordinates.isEmpty()) {
-                            Log.w("ViewModel", "No results with specific query, trying just medicine name: '${medicine.name}'")
-                            val fallbackCoordinates = moondreamClient.point(bitmap, medicine.name)
-
-                            if (fallbackCoordinates != null && fallbackCoordinates.isNotEmpty()) {
-                                Log.i("ViewModel", "Fallback query returned ${fallbackCoordinates.size} coordinate(s)")
-
-                                // Take the first coordinate as best match
-                                val bestMatch = fallbackCoordinates.first()
-
-                                // Optionally verify the match
-                                val isValid = if (enableVerification) {
-                                    Log.d("ViewModel", "Verifying detected point for '${medicine.name}'...")
-                                    verifyMedicineAtPoint(bitmap, medicine.name, bestMatch)
-                                } else {
-                                    true
-                                }
-
-                                if (isValid) {
-                                    allCoordinates.add(bestMatch)
-                                    detectedMedicines.add(medicine.name)
-                                    Log.i("ViewModel", "✓ Successfully detected '${medicine.name}' at (${bestMatch.x}, ${bestMatch.y})")
-                                } else {
-                                    Log.w("ViewModel", "✗ Verification failed for '${medicine.name}' - not the correct medicine")
-                                }
-                            } else {
-                                Log.w("ViewModel", "✗ Medicine '${medicine.name}' not found in image")
-                            }
+                        if (coordinates == null) {
+                            Log.w("ViewModel", "✗ API call failed for '${medicine.name}'")
+                        } else if (coordinates.isEmpty()) {
+                            Log.w("ViewModel", "✗ Medicine '${medicine.name}' not found in image")
                         } else {
-                            Log.i("ViewModel", "Moondream API response: ${coordinates.size} coordinate(s) found")
+                            Log.i("ViewModel", "OpenRouter API returned ${coordinates.size} coordinate(s)")
                             coordinates.forEachIndexed { coordIndex, point ->
                                 Log.d("ViewModel", "  Coordinate $coordIndex: x=${point.x}, y=${point.y}")
                             }
 
                             // Take the first coordinate as best match
                             val bestMatch = coordinates.first()
-
-                            // Optionally verify the match
-                            val isValid = if (enableVerification) {
-                                Log.d("ViewModel", "Verifying detected point for '${medicine.name}'...")
-                                verifyMedicineAtPoint(bitmap, medicine.name, bestMatch)
-                            } else {
-                                true
-                            }
-
-                            if (isValid) {
-                                allCoordinates.add(bestMatch)
-                                detectedMedicines.add(medicine.name)
-                                Log.i("ViewModel", "✓ Successfully detected '${medicine.name}' at (${bestMatch.x}, ${bestMatch.y}) (selected best match from ${coordinates.size} results)")
-                            } else {
-                                Log.w("ViewModel", "✗ Verification failed for '${medicine.name}' - not the correct medicine")
-                            }
+                            allCoordinates.add(bestMatch)
+                            detectedMedicines.add(medicine.name)
+                            Log.i("ViewModel", "✓ Successfully detected '${medicine.name}' at (${bestMatch.x}, ${bestMatch.y})")
                         }
                     } catch (e: Exception) {
                         Log.e("ViewModel", "✗ Exception while detecting '${medicine.name}': ${e.message}", e)
