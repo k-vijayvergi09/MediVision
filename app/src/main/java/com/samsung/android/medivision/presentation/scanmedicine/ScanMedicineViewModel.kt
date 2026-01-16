@@ -1,25 +1,27 @@
-package com.samsung.android.medivision.presentation.documentprocessor
+package com.samsung.android.medivision.presentation.scanmedicine
 
 import android.graphics.Bitmap
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.samsung.android.medivision.data.storage.PrescriptionContextManager
 import com.samsung.android.medivision.domain.usecase.ProcessPrescriptionUseCase
 import com.samsung.android.medivision_sdk.MoondreamClient
+import com.samsung.android.medivision_sdk.Point
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class DocumentProcessorViewModel(
+class ScanMedicineViewModel(
     private val processPrescriptionUseCase: ProcessPrescriptionUseCase,
     private val moondreamClient: MoondreamClient?,
-    private val prescriptionContextManager: com.samsung.android.medivision.data.storage.PrescriptionContextManager
+    private val prescriptionContextManager: PrescriptionContextManager
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(DocumentProcessorState())
-    val state: StateFlow<DocumentProcessorState> = _state.asStateFlow()
+    private val _state = MutableStateFlow(ScanMedicineState())
+    val state: StateFlow<ScanMedicineState> = _state.asStateFlow()
 
     // Configuration: Enable verification to check each detected point
     // Set to false for faster detection (may have false positives)
@@ -34,7 +36,7 @@ class DocumentProcessorViewModel(
     private suspend fun verifyMedicineAtPoint(
         bitmap: Bitmap,
         medicineName: String,
-        point: com.samsung.android.medivision_sdk.Point
+        point: Point
     ): Boolean {
         return try {
             // Use LLM intelligence to verify the match with a simpler, more flexible approach

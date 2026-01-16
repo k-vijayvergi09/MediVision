@@ -18,7 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import com.samsung.android.medivision.di.AppModule
-import com.samsung.android.medivision.presentation.documentprocessor.DocumentProcessorScreen
+import com.samsung.android.medivision.presentation.scanmedicine.ScanMedicineScreen
 import com.samsung.android.medivision.presentation.prescriptionupload.PrescriptionUploadScreen
 import kotlinx.coroutines.launch
 
@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
                     }
                     1 -> {
                         val viewModel = AppModule.provideDocumentProcessorViewModel()
-                        DocumentProcessorScreen(viewModel = viewModel)
+                        ScanMedicineScreen(viewModel = viewModel)
                     }
                 }
             }

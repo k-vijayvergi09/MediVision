@@ -8,7 +8,7 @@ import com.samsung.android.medivision.domain.repository.DocumentRepository
 import com.samsung.android.medivision.domain.repository.MedicineRepository
 import com.samsung.android.medivision.domain.usecase.IdentifyMedicineUseCase
 import com.samsung.android.medivision.domain.usecase.ProcessPrescriptionUseCase
-import com.samsung.android.medivision.presentation.documentprocessor.DocumentProcessorViewModel
+import com.samsung.android.medivision.presentation.scanmedicine.ScanMedicineViewModel
 import com.samsung.android.medivision.presentation.prescriptionupload.PrescriptionUploadViewModel
 import com.samsung.android.medivision_sdk.MoondreamClient
 import com.samsung.android.medivision_sdk.OpenRouterClient
@@ -66,8 +66,8 @@ object AppModule {
         return ProcessPrescriptionUseCase(provideDocumentRepository())
     }
     
-    fun provideDocumentProcessorViewModel(): DocumentProcessorViewModel {
-        return DocumentProcessorViewModel(
+    fun provideDocumentProcessorViewModel(): ScanMedicineViewModel {
+        return ScanMedicineViewModel(
             processPrescriptionUseCase = provideProcessPrescriptionUseCase(),
             moondreamClient = provideMoondreamClient(),
             prescriptionContextManager = providePrescriptionContextManager()

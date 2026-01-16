@@ -1,9 +1,9 @@
-package com.samsung.android.medivision.presentation.documentprocessor
+package com.samsung.android.medivision.presentation.scanmedicine
 
 import android.graphics.Bitmap
 import com.samsung.android.medivision_sdk.Point
 
-data class DocumentProcessorState(
+data class ScanMedicineState(
     val selectedBitmap: Bitmap? = null,
     val fileName: String = "",
     val extractedText: String = "",
