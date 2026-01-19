@@ -4,6 +4,15 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        load(localPropertiesFile.inputStream())
+    }
+}
+
 android {
     namespace = "com.samsung.android.medivision"
     compileSdk = 36
@@ -16,6 +25,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "OPENROUTER_API_KEY", "\"${localProperties.getProperty("OPENROUTER_API_KEY", "")}\"")
+        buildConfigField("String", "MOONDREAM_API_KEY", "\"${localProperties.getProperty("MOONDREAM_API_KEY", "")}\"")
     }
 
     buildTypes {
@@ -33,6 +45,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -41,6 +54,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+
+    // ML Kit Text Recognition
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)

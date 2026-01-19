@@ -24,7 +24,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -133,7 +132,6 @@ private fun PrescriptionUploadContent(
     onClearAll: () -> Unit
 ) {
     val hasDocument = bitmap != null || isPdf
-    val isProcessed = resultText.isNotEmpty()
 
     Column(
         modifier = Modifier
@@ -350,47 +348,6 @@ private fun PrescriptionUploadContent(
                         TextButton(onClick = onDismissError) {
                             Text("Dismiss")
                         }
-                    }
-                }
-            }
-
-            // Success Display
-            if (isProcessed) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Saved Successfully",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                        )
-                        Text(
-                            text = resultText,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
                     }
                 }
             }

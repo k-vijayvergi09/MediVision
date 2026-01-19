@@ -57,10 +57,13 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.samsung.android.medivision.data.ocr.NormalizedBoundingBox
 import com.samsung.android.medivision.data.util.PdfUtils
 
 @Composable
@@ -119,6 +122,7 @@ fun ScanMedicineScreen(
         isLoading = state.isLoading,
         error = state.error,
         medicineCoordinates = state.medicineCoordinates,
+        detectedMedicines = state.detectedMedicines,
         isDetectingCoordinates = state.isDetectingCoordinates,
         onSelectFile = { filePickerLauncher.launch("*/*") },
         onScanMedicines = {
@@ -140,6 +144,7 @@ private fun ScanMedicineContent(
     isLoading: Boolean,
     error: String?,
     medicineCoordinates: List<com.samsung.android.medivision_sdk.Point>?,
+    detectedMedicines: List<DetectedMedicine>,
     isDetectingCoordinates: Boolean,
     onSelectFile: () -> Unit,
     onScanMedicines: () -> Unit,
@@ -218,9 +223,10 @@ private fun ScanMedicineContent(
                     contentAlignment = Alignment.Center
                 ) {
                     if (bitmap != null) {
-                        ImageWithCoordinatesOverlay(
+                        ImageWithBoundingBoxOverlay(
                             bitmap = bitmap,
-                            coordinates = medicineCoordinates
+                            coordinates = medicineCoordinates,
+                            detectedMedicines = detectedMedicines
                         )
                     } else {
                         Column(
@@ -300,8 +306,8 @@ private fun ScanMedicineContent(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Medicine coordinates display
-            if (medicineCoordinates != null && medicineCoordinates.isNotEmpty()) {
+            // Medicine detection display (ML Kit OCR bounding boxes)
+            if (detectedMedicines.isNotEmpty()) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -311,7 +317,41 @@ private fun ScanMedicineContent(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "✓ Medicines Found in Image",
+                            text = "Medicines Found (ML Kit OCR)",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(bottom = 12.dp),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        Text(
+                            text = "Found ${detectedMedicines.size} medicine(s)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Green boxes on the image highlight detected medicines",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            } else if (medicineCoordinates != null && medicineCoordinates.isNotEmpty()) {
+                // Fallback to coordinates display if using old API
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Medicines Found in Image",
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(bottom = 12.dp),
                             color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -473,16 +513,17 @@ private fun ScanMedicineContent(
 }
 
 @Composable
-private fun ImageWithCoordinatesOverlay(
+private fun ImageWithBoundingBoxOverlay(
     bitmap: android.graphics.Bitmap,
-    coordinates: List<com.samsung.android.medivision_sdk.Point>?
+    coordinates: List<com.samsung.android.medivision_sdk.Point>?,
+    detectedMedicines: List<DetectedMedicine>
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
-    
+
     // Calculate aspect ratio
     val imageAspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
-    
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -493,7 +534,7 @@ private fun ImageWithCoordinatesOverlay(
         // Calculate the displayed image size maintaining aspect ratio
         val containerWidth = containerSize.width.toFloat()
         val containerHeight = containerSize.height.toFloat()
-        
+
         // Safety check for zero sizes
         if (containerWidth <= 0f || containerHeight <= 0f || imageAspectRatio <= 0f) {
             Image(
@@ -504,14 +545,14 @@ private fun ImageWithCoordinatesOverlay(
             )
             return@Box
         }
-        
+
         val containerAspectRatio = containerWidth / containerHeight
-        
+
         val displayedWidth: Float
         val displayedHeight: Float
         val offsetX: Float
         val offsetY: Float
-        
+
         if (imageAspectRatio > containerAspectRatio) {
             // Image is wider - fit to width
             displayedWidth = containerWidth
@@ -525,26 +566,53 @@ private fun ImageWithCoordinatesOverlay(
             offsetX = (containerWidth - displayedWidth) / 2f
             offsetY = 0f
         }
-        
+
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = "Document Preview",
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize()
         )
-        
-        // Draw green dots overlay if coordinates are available
-        if (coordinates != null && coordinates.isNotEmpty() && containerSize != IntSize.Zero) {
+
+        // Draw bounding boxes for detected medicines (ML Kit OCR)
+        if (detectedMedicines.isNotEmpty() && containerSize != IntSize.Zero) {
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
                     .matchParentSize()
             ) {
-                val dotRadius = with(density) { 8.dp.toPx() } // Green dot radius (smaller as requested)
+                val strokeWidth = with(density) { 3.dp.toPx() }
+
+                detectedMedicines.forEach { medicine ->
+                    val box = medicine.boundingBox
+
+                    // Convert normalized coordinates to pixel coordinates
+                    val left = offsetX + (box.left * displayedWidth)
+                    val top = offsetY + (box.top * displayedHeight)
+                    val boxWidth = box.width * displayedWidth
+                    val boxHeight = box.height * displayedHeight
+
+                    // Draw green rectangle around the medicine
+                    drawRect(
+                        color = Color.Green,
+                        topLeft = Offset(left, top),
+                        size = Size(boxWidth, boxHeight),
+                        style = Stroke(width = strokeWidth)
+                    )
+                }
+            }
+        }
+        // Fallback: Draw green dots overlay if only coordinates are available (old API)
+        else if (coordinates != null && coordinates.isNotEmpty() && containerSize != IntSize.Zero) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .matchParentSize()
+            ) {
+                val dotRadius = with(density) { 8.dp.toPx() }
 
                 coordinates.forEach { point ->
                     // Convert normalized coordinates (0-1) to pixel coordinates
-                    // Account for the actual displayed image bounds with aspect ratio maintained
                     val x = offsetX + (point.x * displayedWidth)
                     val y = offsetY + (point.y * displayedHeight)
 

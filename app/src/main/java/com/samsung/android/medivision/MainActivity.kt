@@ -24,16 +24,15 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private val openrouterApiKey =
-        "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"
-    
-    private val moondreamApiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlfaWQiOiI0OWY0ZjExNi0yZmZmLTQxMDMtOGNjNC1hMDY4YTkwZjEyNjMiLCJvcmdfaWQiOiJkMGdhQmpDQ1pHbkREZ1ZwTFN1SDYxcXlSck9LcGFKSiIsImlhdCI6MTc2ODQ3NDAxNywidmVyIjoxfQ.CV9s5FyWWcAtVqR2X4pysR9TmwbHMqKCVPJ0ykIMddI"
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Initialize dependency injection once for the whole app
-        AppModule.initialize(applicationContext, openrouterApiKey, moondreamApiKey)
+        AppModule.initialize(
+            applicationContext,
+            BuildConfig.OPENROUTER_API_KEY,
+            BuildConfig.MOONDREAM_API_KEY
+        )
 
         setContent {
             MaterialTheme {

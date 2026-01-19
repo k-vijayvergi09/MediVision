@@ -1,9 +1,12 @@
 package com.samsung.android.medivision.di
 
 import android.content.Context
+import com.samsung.android.medivision.data.ocr.MlKitOcrClient
+import com.samsung.android.medivision.data.ocr.MlKitOcrProvider
 import com.samsung.android.medivision.data.repository.PrescriptionRepositoryImpl
 import com.samsung.android.medivision.data.repository.MedicineRepositoryImpl
 import com.samsung.android.medivision.data.storage.PrescriptionContextManager
+import com.samsung.android.medivision.domain.ocr.OcrProvider
 import com.samsung.android.medivision.domain.repository.PrescriptionRepository
 import com.samsung.android.medivision.domain.repository.MedicineRepository
 import com.samsung.android.medivision.domain.usecase.IdentifyMedicineUseCase
@@ -36,7 +39,20 @@ object AppModule {
             null
         }
     }
-    
+
+    // ML Kit OCR Dependencies
+    private val mlKitOcrClient: MlKitOcrClient by lazy {
+        MlKitOcrClient()
+    }
+
+    fun provideMlKitOcrClient(): MlKitOcrClient {
+        return mlKitOcrClient
+    }
+
+    fun provideOcrProvider(): OcrProvider {
+        return MlKitOcrProvider(mlKitOcrClient)
+    }
+
     // Prescription Upload Dependencies
     private fun provideMedicineRepository(): MedicineRepository {
         return MedicineRepositoryImpl(provideOpenRouterClient())
@@ -69,7 +85,8 @@ object AppModule {
         return ScanMedicineViewModel(
             processPrescriptionUseCase = provideProcessPrescriptionUseCase(),
             openRouterClient = provideOpenRouterClient(),
-            prescriptionContextManager = providePrescriptionContextManager()
+            prescriptionContextManager = providePrescriptionContextManager(),
+            mlKitOcrClient = provideMlKitOcrClient()
         )
     }
 }

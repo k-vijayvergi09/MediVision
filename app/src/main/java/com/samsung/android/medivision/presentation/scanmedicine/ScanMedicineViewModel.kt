@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.samsung.android.medivision.data.ocr.MlKitOcrClient
+import com.samsung.android.medivision.data.ocr.NormalizedBoundingBox
+import com.samsung.android.medivision.data.ocr.OcrLine
 import com.samsung.android.medivision.data.storage.PrescriptionContextManager
 import com.samsung.android.medivision.domain.usecase.ProcessPrescriptionUseCase
 import com.samsung.android.medivision_sdk.OpenRouterClient
@@ -19,7 +22,8 @@ import kotlinx.serialization.json.Json
 class ScanMedicineViewModel(
     private val processPrescriptionUseCase: ProcessPrescriptionUseCase,
     private val openRouterClient: OpenRouterClient,
-    private val prescriptionContextManager: PrescriptionContextManager
+    private val prescriptionContextManager: PrescriptionContextManager,
+    private val mlKitOcrClient: MlKitOcrClient? = null
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ScanMedicineState())
@@ -139,6 +143,122 @@ class ScanMedicineViewModel(
         }
     }
 
+    /**
+     * Uses ML Kit OCR to detect all text in the image and find medicine names.
+     * Returns a list of DetectedMedicine with the largest bounding box for each medicine.
+     */
+    private suspend fun detectMedicinesWithMlKitOcr(
+        bitmap: Bitmap,
+        medicineNames: List<String>
+    ): List<DetectedMedicine> {
+        if (mlKitOcrClient == null) {
+            Log.w("ViewModel", "ML Kit OCR client not available")
+            return emptyList()
+        }
+
+        return try {
+            Log.d("ViewModel", "=== ML Kit OCR Detection ===")
+            Log.d("ViewModel", "Searching for medicines: ${medicineNames.joinToString(", ")}")
+
+            val ocrResult = mlKitOcrClient.recognizeTextWithDetails(bitmap)
+            Log.d("ViewModel", "OCR extracted ${ocrResult.blocks.size} blocks of text")
+            Log.d("ViewModel", "Full text: ${ocrResult.fullText.take(200)}...")
+
+            // Map to store the best (largest area) match for each medicine
+            val bestMatches = mutableMapOf<String, DetectedMedicine>()
+
+            // Search through all lines for medicine matches
+            ocrResult.blocks.forEach { block ->
+                block.lines.forEach { line ->
+                    medicineNames.forEach { medicineName ->
+                        if (isTextMatch(line.text, medicineName)) {
+                            line.boundingBox?.let { boundingBox ->
+                                val area = boundingBox.width * boundingBox.height
+                                val existingMatch = bestMatches[medicineName]
+                                val existingArea = existingMatch?.boundingBox?.let { it.width * it.height } ?: 0f
+
+                                // Keep the match with larger bounding box area
+                                if (area > existingArea) {
+                                    bestMatches[medicineName] = DetectedMedicine(
+                                        name = medicineName,
+                                        matchedText = line.text,
+                                        boundingBox = boundingBox
+                                    )
+                                    Log.i("ViewModel", "✓ Found '$medicineName' in line '${line.text}' (area: $area)")
+                                }
+                            }
+                        }
+                    }
+
+                    // Also check individual elements (words) for partial matches
+                    line.elements.forEach { element ->
+                        medicineNames.forEach { medicineName ->
+                            if (isTextMatch(element.text, medicineName)) {
+                                element.boundingBox?.let { boundingBox ->
+                                    val area = boundingBox.width * boundingBox.height
+                                    val existingMatch = bestMatches[medicineName]
+                                    val existingArea = existingMatch?.boundingBox?.let { it.width * it.height } ?: 0f
+
+                                    // Keep the match with larger bounding box area
+                                    if (area > existingArea) {
+                                        bestMatches[medicineName] = DetectedMedicine(
+                                            name = medicineName,
+                                            matchedText = element.text,
+                                            boundingBox = boundingBox
+                                        )
+                                        Log.i("ViewModel", "✓ Found '$medicineName' in element '${element.text}' (area: $area)")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            val detectedMedicines = bestMatches.values.toList()
+            Log.i("ViewModel", "ML Kit OCR found ${detectedMedicines.size} medicine(s) with best matches")
+            detectedMedicines.forEach { medicine ->
+                Log.d("ViewModel", "  - ${medicine.name}: '${medicine.matchedText}' at ${medicine.boundingBox}")
+            }
+            detectedMedicines
+
+        } catch (e: Exception) {
+            Log.e("ViewModel", "Error in ML Kit OCR detection: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Checks if the OCR text matches a medicine name.
+     * Uses case-insensitive comparison and partial matching.
+     */
+    private fun isTextMatch(ocrText: String, medicineName: String): Boolean {
+        val normalizedOcr = ocrText.lowercase().trim()
+        val normalizedMedicine = medicineName.lowercase().trim()
+
+        // Exact match
+        if (normalizedOcr == normalizedMedicine) return true
+
+        // OCR text contains medicine name
+        if (normalizedOcr.contains(normalizedMedicine)) return true
+
+        // Medicine name contains OCR text (for partial/abbreviated names)
+        if (normalizedMedicine.contains(normalizedOcr) && normalizedOcr.length >= 3) return true
+
+        // Check for common abbreviations or partial matches
+        val medicineWords = normalizedMedicine.split(" ", "-", "_")
+        val ocrWords = normalizedOcr.split(" ", "-", "_")
+
+        // Check if any word matches
+        return medicineWords.any { medWord ->
+            ocrWords.any { ocrWord ->
+                medWord == ocrWord ||
+                (medWord.startsWith(ocrWord) && ocrWord.length >= 3) ||
+                (ocrWord.startsWith(medWord) && medWord.length >= 3)
+            }
+        }
+    }
+
     fun onDocumentSelected(bitmap: Bitmap, fileName: String) {
         _state.update { currentState ->
             currentState.copy(
@@ -147,12 +267,109 @@ class ScanMedicineViewModel(
                 extractedText = "",
                 error = null,
                 medicineCoordinates = null,
-                applicableMedicines = emptyList()
+                applicableMedicines = emptyList(),
+                detectedMedicines = emptyList()
             )
         }
 
-        // Automatically detect applicable medicines and their coordinates
-        detectApplicableMedicines(bitmap)
+        // Automatically detect medicines using ML Kit OCR
+        detectMedicinesWithOcr(bitmap)
+    }
+
+    /**
+     * Detects medicines in the image using ML Kit OCR.
+     * This is the primary detection method that uses on-device OCR.
+     */
+    private fun detectMedicinesWithOcr(bitmap: Bitmap) {
+        viewModelScope.launch {
+            _state.update { it.copy(isDetectingCoordinates = true, error = null) }
+
+            try {
+                Log.d("ViewModel", "=== Starting ML Kit OCR Detection Flow ===")
+
+                // Get current time of day
+                val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                val timeOfDay = when {
+                    currentHour < 12 -> "Morning"
+                    currentHour < 17 -> "Morning"
+                    else -> "Evening"
+                }
+
+                Log.i("ViewModel", "Current time: Hour=$currentHour, TimeOfDay=$timeOfDay")
+
+                // Get all saved prescriptions
+                val prescriptions = prescriptionContextManager.getAllPrescriptionContexts()
+                Log.i("ViewModel", "Retrieved ${prescriptions.size} saved prescription(s)")
+
+                // Collect all medicines that should be taken at this time
+                val applicableMedicines = mutableListOf<com.samsung.android.medivision.domain.model.Medicine>()
+                prescriptions.forEach { prescription ->
+                    prescription.medicines.forEach { medicine ->
+                        val shouldTake = when (medicine.whenToTake) {
+                            "Morning" -> timeOfDay == "Morning"
+                            "Evening" -> timeOfDay == "Evening"
+                            "Both" -> true
+                            else -> false
+                        }
+                        if (shouldTake) {
+                            applicableMedicines.add(medicine)
+                        }
+                    }
+                }
+
+                if (applicableMedicines.isEmpty()) {
+                    Log.w("ViewModel", "No applicable medicines found for $timeOfDay time")
+                    _state.update {
+                        it.copy(
+                            isDetectingCoordinates = false,
+                            applicableMedicines = emptyList(),
+                            extractedText = "No medicines found for $timeOfDay time in your saved prescriptions."
+                        )
+                    }
+                    return@launch
+                }
+
+                Log.i("ViewModel", "Applicable medicines for $timeOfDay: ${applicableMedicines.map { it.name }}")
+
+                // Use ML Kit OCR to detect medicines
+                val medicineNames = applicableMedicines.map { it.name }
+                val detectedMedicines = detectMedicinesWithMlKitOcr(bitmap, medicineNames)
+
+                Log.i("ViewModel", "=== ML Kit Detection Summary ===")
+                Log.i("ViewModel", "Total applicable medicines: ${applicableMedicines.size}")
+                Log.i("ViewModel", "Detected with OCR: ${detectedMedicines.size}")
+
+                val resultText = if (detectedMedicines.isNotEmpty()) {
+                    "Time: $timeOfDay\n\n" +
+                    "Medicines to take now:\n" +
+                    applicableMedicines.joinToString("\n") { "• ${it.name}" } +
+                    "\n\nDetected in image (ML Kit OCR):\n" +
+                    detectedMedicines.joinToString("\n") { "✓ ${it.name} (found: '${it.matchedText}')" }
+                } else {
+                    "Time: $timeOfDay\n\n" +
+                    "Medicines to take now:\n" +
+                    applicableMedicines.joinToString("\n") { "• ${it.name}" } +
+                    "\n\nNone of these medicines were found in the image."
+                }
+
+                _state.update {
+                    it.copy(
+                        applicableMedicines = applicableMedicines,
+                        detectedMedicines = detectedMedicines,
+                        isDetectingCoordinates = false,
+                        extractedText = resultText
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Error in detectMedicinesWithOcr", e)
+                _state.update {
+                    it.copy(
+                        isDetectingCoordinates = false,
+                        error = "Failed to detect medicines: ${e.message}"
+                    )
+                }
+            }
+        }
     }
 
     /**
