@@ -22,5 +22,8 @@ data class ScanMedicineState(
     val medicineCoordinates: List<Point>? = null,
     val isDetectingCoordinates: Boolean = false,
     val applicableMedicines: List<com.samsung.android.medivision.domain.model.Medicine> = emptyList(),
-    val detectedMedicines: List<DetectedMedicine> = emptyList()
+    val detectedMedicines: List<DetectedMedicine> = emptyList(),
+    val isRealTimeMode: Boolean = false,
+    val cameraFrameWidth: Int = 0,
+    val cameraFrameHeight: Int = 0
 )

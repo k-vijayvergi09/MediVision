@@ -29,6 +29,11 @@ class ScanMedicineViewModel(
     private val _state = MutableStateFlow(ScanMedicineState())
     val state: StateFlow<ScanMedicineState> = _state.asStateFlow()
 
+    // Real-time OCR throttling
+    private var lastOcrTimestamp = 0L
+    private val ocrThrottleMs = 500L
+    private var cachedMedicineNames: List<String>? = null
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -511,6 +516,93 @@ class ScanMedicineViewModel(
                         error = "Failed to detect medicines: ${e.message}"
                     )
                 }
+            }
+        }
+    }
+
+    fun toggleRealTimeMode() {
+        val newMode = !_state.value.isRealTimeMode
+        _state.update {
+            it.copy(
+                isRealTimeMode = newMode,
+                // Clear previous results when switching modes
+                detectedMedicines = emptyList(),
+                selectedBitmap = null,
+                fileName = "",
+                extractedText = "",
+                medicineCoordinates = null,
+                error = null
+            )
+        }
+        if (newMode) {
+            // Pre-load applicable medicines when entering real-time mode
+            loadApplicableMedicines()
+        } else {
+            cachedMedicineNames = null
+        }
+    }
+
+    private fun loadApplicableMedicines() {
+        viewModelScope.launch {
+            try {
+                val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                val timeOfDay = when {
+                    currentHour < 12 -> "Morning"
+                    currentHour < 17 -> "Morning"
+                    else -> "Evening"
+                }
+
+                val prescriptions = prescriptionContextManager.getAllPrescriptionContexts()
+                val applicableMedicines = mutableListOf<com.samsung.android.medivision.domain.model.Medicine>()
+                prescriptions.forEach { prescription ->
+                    prescription.medicines.forEach { medicine ->
+                        val shouldTake = when (medicine.whenToTake) {
+                            "Morning" -> timeOfDay == "Morning"
+                            "Evening" -> timeOfDay == "Evening"
+                            "Both" -> true
+                            else -> false
+                        }
+                        if (shouldTake) applicableMedicines.add(medicine)
+                    }
+                }
+
+                cachedMedicineNames = applicableMedicines.map { it.name }
+                _state.update { it.copy(applicableMedicines = applicableMedicines) }
+
+                if (applicableMedicines.isEmpty()) {
+                    _state.update {
+                        it.copy(extractedText = "No medicines found for $timeOfDay time in your saved prescriptions.")
+                    }
+                }
+
+                Log.i("ViewModel", "Real-time mode: cached ${cachedMedicineNames?.size} medicine names for $timeOfDay")
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Failed to load applicable medicines", e)
+                _state.update { it.copy(error = "Failed to load medicines: ${e.message}") }
+            }
+        }
+    }
+
+    fun processFrameForOcr(bitmap: Bitmap) {
+        val now = System.currentTimeMillis()
+        if (now - lastOcrTimestamp < ocrThrottleMs) return
+        lastOcrTimestamp = now
+
+        val medicineNames = cachedMedicineNames
+        if (medicineNames.isNullOrEmpty()) return
+
+        viewModelScope.launch {
+            try {
+                val detectedMedicines = detectMedicinesWithMlKitOcr(bitmap, medicineNames)
+                _state.update {
+                    it.copy(
+                        detectedMedicines = detectedMedicines,
+                        cameraFrameWidth = bitmap.width,
+                        cameraFrameHeight = bitmap.height
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Real-time OCR error: ${e.message}")
             }
         }
     }

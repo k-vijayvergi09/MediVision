@@ -57,6 +57,12 @@ dependencies {
 
     // ML Kit Text Recognition
     implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // CameraX
+    implementation("androidx.camera:camera-core:1.4.1")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
     
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)

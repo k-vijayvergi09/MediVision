@@ -6,8 +6,14 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -39,9 +45,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,19 +60,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.samsung.android.medivision.data.ocr.NormalizedBoundingBox
 import com.samsung.android.medivision.data.util.PdfUtils
+import java.util.concurrent.Executors
 
 @Composable
 fun ScanMedicineScreen(
@@ -109,9 +120,29 @@ fun ScanMedicineScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            cameraLauncher.launch(null)
+            if (state.isRealTimeMode) {
+                // Permission granted while trying to enable real-time mode — toggle is already on
+            } else {
+                cameraLauncher.launch(null)
+            }
         } else {
             viewModel.setError("Camera permission denied. Please enable it to identify medicines.")
+        }
+    }
+
+    // Permission-aware toggle handler
+    val onToggleRealTime: () -> Unit = {
+        if (!state.isRealTimeMode) {
+            // Turning ON — check permission first
+            when (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)) {
+                PackageManager.PERMISSION_GRANTED -> viewModel.toggleRealTimeMode()
+                else -> {
+                    viewModel.toggleRealTimeMode() // Set flag so UI is ready
+                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                }
+            }
+        } else {
+            viewModel.toggleRealTimeMode()
         }
     }
 
@@ -124,6 +155,8 @@ fun ScanMedicineScreen(
         medicineCoordinates = state.medicineCoordinates,
         detectedMedicines = state.detectedMedicines,
         isDetectingCoordinates = state.isDetectingCoordinates,
+        isRealTimeMode = state.isRealTimeMode,
+        onToggleRealTime = onToggleRealTime,
         onSelectFile = { filePickerLauncher.launch("*/*") },
         onScanMedicines = {
             when (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)) {
@@ -132,7 +165,10 @@ fun ScanMedicineScreen(
             }
         },
         onProcessDocument = { viewModel.processPrescription() },
-        onDismissError = { viewModel.clearError() }
+        onDismissError = { viewModel.clearError() },
+        onFrameForOcr = { bitmap -> viewModel.processFrameForOcr(bitmap) },
+        cameraFrameWidth = state.cameraFrameWidth,
+        cameraFrameHeight = state.cameraFrameHeight
     )
 }
 
@@ -146,10 +182,15 @@ private fun ScanMedicineContent(
     medicineCoordinates: List<com.samsung.android.medivision_sdk.Point>?,
     detectedMedicines: List<DetectedMedicine>,
     isDetectingCoordinates: Boolean,
+    isRealTimeMode: Boolean,
+    onToggleRealTime: () -> Unit,
     onSelectFile: () -> Unit,
     onScanMedicines: () -> Unit,
     onProcessDocument: () -> Unit,
-    onDismissError: () -> Unit
+    onDismissError: () -> Unit,
+    onFrameForOcr: (android.graphics.Bitmap) -> Unit,
+    cameraFrameWidth: Int,
+    cameraFrameHeight: Int
 ) {
     val hasDocument = bitmap != null
 
@@ -186,6 +227,24 @@ private fun ScanMedicineContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
+
+                // Real-time toggle
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "Real-time detection",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = isRealTimeMode,
+                        onCheckedChange = { onToggleRealTime() }
+                    )
+                }
             }
         }
 
@@ -195,7 +254,7 @@ private fun ScanMedicineContent(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            // Document Preview Card
+            // Preview Card — either live camera or static image
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -212,7 +271,7 @@ private fun ScanMedicineContent(
                         .padding(2.dp)
                         .border(
                             width = 2.dp,
-                            color = if (hasDocument) {
+                            color = if (isRealTimeMode || hasDocument) {
                                 MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)
                             } else {
                                 MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
@@ -222,7 +281,14 @@ private fun ScanMedicineContent(
                         .clip(RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (bitmap != null) {
+                    if (isRealTimeMode) {
+                        RealTimeCameraPreview(
+                            detectedMedicines = detectedMedicines,
+                            cameraFrameWidth = cameraFrameWidth,
+                            cameraFrameHeight = cameraFrameHeight,
+                            onFrameForOcr = onFrameForOcr
+                        )
+                    } else if (bitmap != null) {
                         ImageWithBoundingBoxOverlay(
                             bitmap = bitmap,
                             coordinates = medicineCoordinates,
@@ -259,8 +325,8 @@ private fun ScanMedicineContent(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // File name display
-            if (fileName.isNotEmpty()) {
+            // File name display (only in capture mode)
+            if (!isRealTimeMode && fileName.isNotEmpty()) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -317,7 +383,7 @@ private fun ScanMedicineContent(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Medicines Found (ML Kit OCR)",
+                            text = if (isRealTimeMode) "Medicines Detected (Live)" else "Medicines Found (ML Kit OCR)",
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(bottom = 12.dp),
                             color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -340,7 +406,7 @@ private fun ScanMedicineContent(
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-            } else if (medicineCoordinates != null && medicineCoordinates.isNotEmpty()) {
+            } else if (!isRealTimeMode && medicineCoordinates != null && medicineCoordinates.isNotEmpty()) {
                 // Fallback to coordinates display if using old API
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -376,72 +442,74 @@ private fun ScanMedicineContent(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Action Buttons
-            FilledTonalButton(
-                onClick = onScanMedicines,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CameraAlt,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Capture Image",
-                    style = MaterialTheme.typography.titleMedium
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onSelectFile,
+            // Action Buttons — only shown in capture mode
+            if (!isRealTimeMode) {
+                FilledTonalButton(
+                    onClick = onScanMedicines,
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .height(56.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Image,
+                        imageVector = Icons.Default.CameraAlt,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Upload")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Capture Image",
+                        style = MaterialTheme.typography.titleMedium
+                    )
                 }
 
-                Button(
-                    onClick = onProcessDocument,
-                    enabled = hasDocument && !isLoading,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(56.dp),
-                    shape = RoundedCornerShape(12.dp)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Processing")
-                    } else {
+                    OutlinedButton(
+                        onClick = onSelectFile,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.QrCodeScanner,
+                            imageVector = Icons.Default.Image,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Identify")
+                        Text("Upload")
+                    }
+
+                    Button(
+                        onClick = onProcessDocument,
+                        enabled = hasDocument && !isLoading,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Processing")
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.QrCodeScanner,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Identify")
+                        }
                     }
                 }
             }
@@ -506,6 +574,147 @@ private fun ScanMedicineContent(
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RealTimeCameraPreview(
+    detectedMedicines: List<DetectedMedicine>,
+    cameraFrameWidth: Int,
+    cameraFrameHeight: Int,
+    onFrameForOcr: (android.graphics.Bitmap) -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            analysisExecutor.shutdown()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { containerSize = it.size }
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                val previewView = PreviewView(ctx).apply {
+                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                }
+
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                cameraProviderFuture.addListener({
+                    val cameraProvider = cameraProviderFuture.get()
+
+                    val preview = Preview.Builder().build().also {
+                        it.surfaceProvider = previewView.surfaceProvider
+                    }
+
+                    val imageAnalysis = ImageAnalysis.Builder()
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build()
+                        .also { analysis ->
+                            analysis.setAnalyzer(analysisExecutor) { imageProxy ->
+                                try {
+                                    val rawBitmap = imageProxy.toBitmap()
+                                    val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+
+                                    // Rotate bitmap to match the display orientation.
+                                    // The raw sensor image is typically landscape; PreviewView
+                                    // auto-rotates but ImageAnalysis does not.
+                                    val bitmap = if (rotationDegrees != 0) {
+                                        val matrix = android.graphics.Matrix().apply {
+                                            postRotate(rotationDegrees.toFloat())
+                                        }
+                                        android.graphics.Bitmap.createBitmap(
+                                            rawBitmap, 0, 0,
+                                            rawBitmap.width, rawBitmap.height,
+                                            matrix, true
+                                        )
+                                    } else {
+                                        rawBitmap
+                                    }
+
+                                    onFrameForOcr(bitmap)
+                                } catch (e: Exception) {
+                                    Log.e("CameraPreview", "Frame conversion error: ${e.message}")
+                                } finally {
+                                    imageProxy.close()
+                                }
+                            }
+                        }
+
+                    try {
+                        cameraProvider.unbindAll()
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            CameraSelector.DEFAULT_BACK_CAMERA,
+                            preview,
+                            imageAnalysis
+                        )
+                    } catch (e: Exception) {
+                        Log.e("CameraPreview", "Camera bind failed: ${e.message}")
+                    }
+                }, ContextCompat.getMainExecutor(ctx))
+
+                previewView
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Bounding box overlay on camera feed
+        if (detectedMedicines.isNotEmpty() && containerSize != IntSize.Zero
+            && cameraFrameWidth > 0 && cameraFrameHeight > 0
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = with(density) { 3.dp.toPx() }
+                val containerWidth = containerSize.width.toFloat()
+                val containerHeight = containerSize.height.toFloat()
+
+                // FILL_CENTER: the image is scaled to fill the container, then centered
+                // (parts of the image may be cropped).
+                val imageAspectRatio = cameraFrameWidth.toFloat() / cameraFrameHeight.toFloat()
+                val containerAspectRatio = containerWidth / containerHeight
+
+                val scaledImageWidth: Float
+                val scaledImageHeight: Float
+                if (imageAspectRatio > containerAspectRatio) {
+                    // Image is wider — fit height, crop sides
+                    scaledImageHeight = containerHeight
+                    scaledImageWidth = containerHeight * imageAspectRatio
+                } else {
+                    // Image is taller — fit width, crop top/bottom
+                    scaledImageWidth = containerWidth
+                    scaledImageHeight = containerWidth / imageAspectRatio
+                }
+
+                val offsetX = (scaledImageWidth - containerWidth) / 2f
+                val offsetY = (scaledImageHeight - containerHeight) / 2f
+
+                detectedMedicines.forEach { medicine ->
+                    val box = medicine.boundingBox
+
+                    // Map normalized coords (0-1 of full image) to screen pixels,
+                    // accounting for the crop offset from FILL_CENTER.
+                    val left = box.left * scaledImageWidth - offsetX
+                    val top = box.top * scaledImageHeight - offsetY
+                    val boxWidth = box.width * scaledImageWidth
+                    val boxHeight = box.height * scaledImageHeight
+
+                    drawRect(
+                        color = Color.Green,
+                        topLeft = Offset(left, top),
+                        size = Size(boxWidth, boxHeight),
+                        style = Stroke(width = strokeWidth)
+                    )
                 }
             }
         }
